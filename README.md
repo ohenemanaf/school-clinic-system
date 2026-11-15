@@ -11,6 +11,7 @@
 ![Node.js](https://img.shields.io/badge/Node.js-22-5fa04e?logo=nodedotjs&logoColor=white)
 ![Express](https://img.shields.io/badge/Express-5-000000?logo=express&logoColor=white)
 ![MySQL](https://img.shields.io/badge/MySQL-8-4479a1?logo=mysql&logoColor=white)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 [Features](#features) · [Screenshots](#screenshots) · [Architecture](#architecture) · [Getting started](#getting-started) · [API](#api-reference) · [Deployment](#deployment)
 
@@ -309,6 +310,10 @@ This repository combines three earlier versions of the project into one codebase
 
 - **`clinic-appointment`**: an earlier copy of this Node/React app
 - **`CLINIC`**: a Java/Spring Boot version for a general clinic; its printable prescription layout was ported here
+
+## License
+
+Released under the [MIT License](LICENSE).
 
 ## Author
 
