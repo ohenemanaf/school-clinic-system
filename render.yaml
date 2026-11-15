@@ -1,0 +1,36 @@
+# Render Blueprint: New > Blueprint > pick this repo. Fill the "sync: false" values in the dashboard.
+services:
+  - type: web
+    name: campus-clinic-api
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm ci
+    # db:setup is idempotent (CREATE TABLE IF NOT EXISTS + guarded migrations).
+    startCommand: npm run db:setup && node server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "1"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_SSL_CA
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: DEFAULT_ADMIN_EMAIL
+        sync: false
+      - key: DEFAULT_ADMIN_PASSWORD
+        sync: false
