@@ -1,7 +1,7 @@
 const mysql = require('mysql2/promise');
 require('dotenv').config({ quiet: true });
 
-// Managed MySQL (Aiven, TiDB, PlanetScale...) requires TLS. Provide the provider's CA
+// Managed MySQL (TiDB Cloud, Aiven, PlanetScale...) requires TLS. Set DB_SSL=true for a public CA, or provide the provider's CA
 // certificate as DB_SSL_CA (PEM text; literal "\n" sequences are accepted) to verify it.
 function sslConfig() {
     if (process.env.DB_SSL_CA) {
