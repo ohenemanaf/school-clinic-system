@@ -99,7 +99,7 @@ erDiagram
 | Backend | Node.js 22, Express 5, mysql2, jsonwebtoken, bcryptjs, helmet, express-rate-limit, multer |
 | Database | MySQL 8 (TLS supported for managed providers) |
 | Testing & CI | `node:test` + Supertest against MySQL, oxlint, GitHub Actions |
-| Hosting | Vercel (frontend), Render (API), Aiven (MySQL) |
+| Hosting | Vercel (frontend), Render (API), TiDB Cloud Starter (MySQL-compatible) |
 
 ## Security
 
@@ -155,7 +155,7 @@ Sign in with the admin account from your `.env` and add a staff member. Use **Cr
 | Variable | Required | Description |
 |---|:---:|---|
 | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | ✓ | MySQL connection |
-| `DB_SSL_CA` | | CA certificate (PEM) for managed MySQL such as Aiven |
+| `DB_SSL` / `DB_SSL_CA` | | `DB_SSL=true` for TLS with a public CA (TiDB Cloud); or paste a private CA certificate (PEM) |
 | `JWT_SECRET` | ✓ | 32+ characters. Generate one with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` |
 | `JWT_EXPIRES_IN` | | Session length. Default `2h` |
 | `DEFAULT_ADMIN_EMAIL`, `DEFAULT_ADMIN_PASSWORD` | | Creates the first admin on startup (password 12+ characters) |
@@ -294,7 +294,7 @@ school-clinic-system/
 
 ## Deployment
 
-The app runs entirely on free tiers: **Vercel** (frontend), **Render** (API, via `render.yaml`) and **Aiven** (MySQL). Step-by-step instructions are in [DEPLOYMENT.md](DEPLOYMENT.md). The original AWS EC2 + RDS + S3 guide is kept in [docs/DEPLOYMENT_AWS.md](docs/DEPLOYMENT_AWS.md).
+The app runs entirely on free tiers: **Vercel** (frontend), **Render** (API, via `render.yaml`) and **TiDB Cloud Starter** (MySQL-compatible). Step-by-step instructions are in [DEPLOYMENT.md](DEPLOYMENT.md). The original AWS EC2 + RDS + S3 guide is kept in [docs/DEPLOYMENT_AWS.md](docs/DEPLOYMENT_AWS.md).
 
 ## Roadmap
 

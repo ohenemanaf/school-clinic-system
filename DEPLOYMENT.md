@@ -1,20 +1,23 @@
-# Deploying for free: Aiven + Render + Vercel
+# Deploying for free: TiDB Cloud + Render + Vercel
 
 | Part | Host | Free tier notes |
 |---|---|---|
-| MySQL database | [Aiven](https://aiven.io) | 1 free MySQL service. It powers off after a long period of inactivity; power it back on from the console. |
+| MySQL database | [TiDB Cloud Starter](https://tidbcloud.com) | MySQL-compatible, free monthly quota, no credit card. Aiven's free MySQL tier closed to new services in Nov 2026. |
 | Express API | [Render](https://render.com) | Sleeps after 15 minutes idle. The first request after that takes about 30–50 s, and the frontend waits up to 60 s. |
 | React frontend | [Vercel](https://vercel.com) | Static hosting; `frontend/vercel.json` already handles client-side routes. |
 
 It takes about 20 minutes. Do the steps in this order, because each one needs a URL from the step before it.
 
-## 1. Database (Aiven)
+## 1. Database (TiDB Cloud Starter)
 
-1. Create an account, then **Create service → MySQL → Free plan**, and pick a region near your users.
-2. When the service is running, open **Overview → Connection information** and note the **Host**, **Port**, **User** (`avnadmin`), **Password** and **Database name** (`defaultdb`).
-3. On the same page, download the **CA certificate** (`ca.pem`). The API uses it to verify the TLS connection.
+1. Sign up at [tidbcloud.com](https://tidbcloud.com) and create a **Starter** cluster in the region nearest your users.
+2. Open the cluster's **SQL Editor** and run `CREATE DATABASE clinic;`.
+3. Click **Connect**, choose **General** as the connection type, and note the **Host**, **Port** (`4000`), **User** (it looks like `xxxxxxxx.root`) and **Password**. Generate a password if you don't have one yet.
+4. TiDB's TLS certificate is signed by a public authority, so you don't need a CA file. Setting `DB_SSL=true` is enough.
 
 You don't need to create any tables yourself. The API creates them on first start.
+
+> **Note:** the app was tested on MySQL 8.4. TiDB is MySQL-compatible, and its docs say it supports everything the schema uses (stored generated columns with a unique index, `SELECT � FOR UPDATE`), but treat the first deploy as the test. If `npm run db:setup` fails in the Render logs, the simplest fallback is a paid MySQL host, such as Aiven's Developer plan.
 
 ## 2. API (Render)
 
@@ -24,8 +27,10 @@ You don't need to create any tables yourself. The API creates them on first star
 
    | Key | Value |
    |---|---|
-   | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | From Aiven |
-   | `DB_SSL_CA` | Paste the full contents of `ca.pem`, including the BEGIN/END lines |
+   | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` | From TiDB's **Connect** dialog |
+   | `DB_NAME` | `clinic` |
+   | `DB_SSL` | `true` |
+   | `DB_SSL_CA` | Leave empty for TiDB. For a provider with a private CA, paste the full `ca.pem` here instead. |
    | `CORS_ORIGIN` | Leave as `http://localhost:5173` for now; you update it in step 4 |
    | `DEFAULT_ADMIN_EMAIL` | Your email |
    | `DEFAULT_ADMIN_PASSWORD` | A strong password of 12+ characters. You can remove it after the first deploy, because the admin already exists by then. |
