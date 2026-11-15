@@ -1,23 +1,20 @@
 const express = require('express');
-const router = express.Router();
-const uploadController = require('../controllers/uploadController');
-const { verifyToken } = require('../middleware/authMiddleware');
 const multer = require('multer');
+const c = require('../controllers/uploadController');
+const { verifyToken } = require('../middleware/authMiddleware');
 
-// Configure multer to use memory storage so we can stream directly to S3
-const storage = multer.memoryStorage();
-const upload = multer({ 
-    storage,
-    limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB limit
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 2 * 1024 * 1024, files: 1 },
     fileFilter: (req, file, cb) => {
-        if (file.mimetype.startsWith('image/')) {
-            cb(null, true);
-        } else {
-            cb(new Error('Only image files are allowed!'), false);
-        }
-    }
+        if (c.ALLOWED_TYPES.includes(file.mimetype)) return cb(null, true);
+        const err = new Error('Only JPG, PNG or WebP images are allowed.');
+        err.status = 400;
+        cb(err);
+    },
 });
 
-router.post('/profile-picture', verifyToken, upload.single('profilePicture'), uploadController.uploadProfilePicture);
+const router = express.Router();
+router.post('/profile-picture', verifyToken, upload.single('profilePicture'), c.uploadProfilePicture);
 
 module.exports = router;

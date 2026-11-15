@@ -43,9 +43,9 @@ The backend serves as the API bridge between the React frontend and the MySQL da
    DB_USER=root
    DB_PASSWORD=
    DB_NAME=schoolclinic_db
-   JWT_SECRET=supersecret12345
-   DEFAULT_ADMIN_EMAIL=admin@clinic.com
-   DEFAULT_ADMIN_PASSWORD=admin123
+   JWT_SECRET=<run: node -e "console.log(require('crypto').randomBytes(48).toString('hex'))">
+   DEFAULT_ADMIN_EMAIL=you@example.com
+   DEFAULT_ADMIN_PASSWORD=<12+ characters>
    ```
    *(Note: XAMPP's default MySQL username is `root` with no password, which is why `DB_PASSWORD` is blank).*
 5. Start the backend server:
@@ -80,7 +80,7 @@ The frontend is built with React and Vite.
 The application is now fully running! When the backend starts, it automatically creates the default admin if that account does not already exist. To test the different portals, use:
 
 **Admin Account:**
-- **Email:** `admin@clinic.com`
-- **Password:** `admin123`
+- **Email:** the `DEFAULT_ADMIN_EMAIL` you set
+- **Password:** the `DEFAULT_ADMIN_PASSWORD` you set
 
 Log in with this account, and from the Admin Dashboard, you can create Doctor/Staff accounts to test the Staff Portal. You can also register a brand new account from the login screen to test the Student Portal!

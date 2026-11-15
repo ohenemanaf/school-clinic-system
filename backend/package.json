@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "seed:admin": "node seed-admin.js",
-    "test": "node --test"
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.js\"",
+    "db:setup": "node setup-db.js",
+    "seed:demo": "node seed-db.js"
   },
   "keywords": [],
   "author": "",
@@ -18,8 +20,13 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.7.4",
+    "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.2.0",
     "mysql2": "^3.22.6"
+  },
+  "devDependencies": {
+    "supertest": "^7.3.2"
   }
 }

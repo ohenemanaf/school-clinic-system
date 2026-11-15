@@ -60,7 +60,7 @@ This guide is written specifically for a brand new AWS user. It will tell you ex
 5. **CRITICAL STEP**: Under "Templates", select **Free tier**! If you miss this, you will be charged money.
 6. **DB instance identifier:** Type `schoolclinic-db`
 7. **Master username:** Type `admin`
-8. **Master password:** Type `ClinicPassword123!` (and confirm it). Write this down!
+8. **Master password:** Generate a long random password (a password manager is ideal) and store it safely.
 9. Scroll down to **Connectivity**:
    - **Public access:** Select **No**.
    - **VPC security group (firewall):** Choose **Choose existing**.
@@ -148,9 +148,9 @@ This guide is written specifically for a brand new AWS user. It will tell you ex
    PORT=5000
    DB_HOST=schoolclinic-db.xxxxxx.us-east-1.rds.amazonaws.com
    DB_USER=admin
-   DB_PASSWORD=ClinicPassword123!
+   DB_PASSWORD=<your RDS master password>
    DB_NAME=schoolclinic_db
-   JWT_SECRET=mySuperSecretKey123!
+   JWT_SECRET=<48+ random hex chars>
    AWS_REGION=us-east-1
    AWS_S3_BUCKET_NAME=schoolclinic-assets-john-9912
    ```

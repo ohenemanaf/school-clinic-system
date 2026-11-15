@@ -1,5 +1,4 @@
-CREATE DATABASE IF NOT EXISTS schoolclinic_db;
-USE schoolclinic_db;
+-- Run with `npm run db:setup` (uses DB_NAME from .env). Every statement is idempotent.
 
 -- 1. Users Table (Authentication & Core Identity)
 CREATE TABLE IF NOT EXISTS users (
@@ -50,10 +49,15 @@ CREATE TABLE IF NOT EXISTS time_slots (
 CREATE TABLE IF NOT EXISTS appointments (
     appointment_id INT AUTO_INCREMENT PRIMARY KEY,
     student_id INT NOT NULL,
-    slot_id INT NOT NULL UNIQUE, -- Unique ensures a time slot cannot be double-booked
+    slot_id INT NOT NULL,
     reason TEXT NOT NULL,
     status ENUM('pending', 'confirmed', 'cancelled', 'completed') DEFAULT 'pending',
+    -- NULL once cancelled, so only ONE active appointment can hold a slot, while a
+    -- slot freed by a student cancellation can be booked again.
+    active_slot_id INT GENERATED ALWAYS AS (IF(status = 'cancelled', NULL, slot_id)) STORED,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_active_slot (active_slot_id),
+    KEY idx_appointments_slot (slot_id),
     FOREIGN KEY (student_id) REFERENCES students(student_id) ON DELETE CASCADE,
     FOREIGN KEY (slot_id) REFERENCES time_slots(slot_id) ON DELETE RESTRICT
 );
@@ -79,4 +83,17 @@ CREATE TABLE IF NOT EXISTS notifications (
     is_read BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+);
+
+-- 8. Prescriptions (one medical record can have several medicines)
+CREATE TABLE IF NOT EXISTS prescriptions (
+    prescription_id INT AUTO_INCREMENT PRIMARY KEY,
+    record_id INT NOT NULL,
+    medicine_name VARCHAR(255) NOT NULL,
+    dosage VARCHAR(100),
+    frequency VARCHAR(100),
+    duration VARCHAR(100),
+    instructions TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (record_id) REFERENCES medical_records(record_id) ON DELETE CASCADE
 );

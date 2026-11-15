@@ -1,36 +1,22 @@
 const pool = require('../config/db');
 
-exports.updateProfile = async (req, res) => {
-    const userId = req.user.userId;
-    const { contactNumber } = req.body;
-    
-    try {
-        await pool.query(
-            'UPDATE students SET contact_number = ? WHERE user_id = ?',
-            [contactNumber, userId]
-        );
-        res.json({ message: 'Profile updated successfully' });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Error updating profile', error: error.message });
-    }
+exports.getProfile = async (req, res) => {
+    const [rows] = await pool.query(`
+        SELECT s.student_id, s.student_number, s.first_name, s.last_name, s.dob, s.contact_number,
+               u.email, u.profile_picture_url
+        FROM students s JOIN users u ON s.user_id = u.user_id
+        WHERE s.student_id = ?
+    `, [req.student.student_id]);
+    res.json(rows[0]);
 };
 
-exports.getProfile = async (req, res) => {
-    const userId = req.user.userId;
-    try {
-        const [student] = await pool.query(`
-            SELECT s.*, u.email, u.profile_picture_url 
-            FROM students s 
-            JOIN users u ON s.user_id = u.user_id 
-            WHERE s.user_id = ?
-        `, [userId]);
-        
-        if (student.length === 0) return res.status(404).json({ message: 'Student not found' });
-        
-        res.json(student[0]);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Error fetching profile', error: error.message });
+exports.updateProfile = async (req, res) => {
+    if (!/^[+\d][\d\s-]{5,19}$/.test(req.body.contactNumber)) {
+        return res.status(400).json({ message: 'contactNumber must be a valid phone number' });
     }
+    await pool.query('UPDATE students SET contact_number = ? WHERE student_id = ?', [
+        req.body.contactNumber,
+        req.student.student_id,
+    ]);
+    res.json({ message: 'Profile updated' });
 };

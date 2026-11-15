@@ -1,9 +1,12 @@
 const express = require('express');
-const router = express.Router();
-const notificationController = require('../controllers/notificationController');
+const c = require('../controllers/notificationController');
 const { verifyToken } = require('../middleware/authMiddleware');
+const { validateIdParam } = require('../middleware/validate');
 
-router.get('/:userId', verifyToken, notificationController.getNotifications);
-router.put('/:id/read', verifyToken, notificationController.markAsRead);
+const router = express.Router();
+
+router.get('/me', verifyToken, c.getNotifications);
+router.put('/read-all', verifyToken, c.markAllAsRead);
+router.put('/:id/read', verifyToken, validateIdParam(), c.markAsRead);
 
 module.exports = router;
