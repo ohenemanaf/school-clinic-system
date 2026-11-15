@@ -1,9 +1,11 @@
 const express = require('express');
-const router = express.Router();
-const studentController = require('../controllers/studentController');
-const { verifyToken } = require('../middleware/authMiddleware');
+const c = require('../controllers/studentController');
+const { studentOnly } = require('../middleware/authMiddleware');
+const { validateBody, rules } = require('../middleware/validate');
 
-router.get('/:id', verifyToken, studentController.getProfile);
-router.put('/:id', verifyToken, studentController.updateProfile);
+const router = express.Router();
+
+router.get('/me', studentOnly, c.getProfile);
+router.put('/me', studentOnly, validateBody({ contactNumber: { rule: rules.string({ max: 20 }) } }), c.updateProfile);
 
 module.exports = router;

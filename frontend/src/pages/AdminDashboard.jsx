@@ -1,279 +1,276 @@
-import React, { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useCallback, useEffect, useState } from 'react';
+import { IconUserPlus, IconUsers, IconStethoscope, IconCalendarEvent, IconClockHour4 } from '@tabler/icons-react';
 import api from '../utils/api';
-import { 
-    IconUsers, 
-    IconStethoscope, 
-    IconCalendarEvent, 
-    IconActivity,
-    IconLogout
-} from '@tabler/icons-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+import AppShell from '../components/AppShell';
+import { Button, Card, EmptyState, Field, Input, Modal, Segmented, Spinner, StatusPill, useToast, errorMessage } from '../components/ui';
+import { formatDate, parseDate } from '../utils/format';
 
-const AdminDashboard = () => {
-    const { logout, user } = useAuth();
-    const [stats, setStats] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [showAddStaff, setShowAddStaff] = useState(false);
-    
-    // Add Staff Form State
-    const [newStaff, setNewStaff] = useState({
-        firstName: '', lastName: '', email: '', password: '', specialization: '', roomNumber: ''
+// Order chosen so neighbours stay distinguishable for colour-blind readers (validated);
+// every segment also carries a text label + count, so colour is never the only cue.
+const STATUS_ORDER = [
+    { key: 'completed', label: 'Completed', color: '#059669' },
+    { key: 'confirmed', label: 'Confirmed', color: '#2563eb' },
+    { key: 'pending', label: 'Pending', color: '#f59e0b' },
+    { key: 'cancelled', label: 'Cancelled', color: '#94a3b8' },
+];
+
+function Stat({ icon: Icon, label, value, note }) {
+    return (
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+                <Icon size={15} className="text-slate-400" /> {label}
+            </div>
+            <p className="mt-1.5 text-2xl font-semibold tabular-nums text-slate-900">{value}</p>
+            {note && <p className="mt-0.5 text-xs text-slate-500">{note}</p>}
+        </div>
+    );
+}
+
+function StatusBreakdown({ appointments }) {
+    const total = appointments.total;
+    if (!total) return <EmptyState icon={IconCalendarEvent} title="No appointments yet" />;
+    return (
+        <div>
+            <div className="flex h-3 gap-0.5 overflow-hidden rounded-full" role="img" aria-label="Appointments by status">
+                {STATUS_ORDER.filter((s) => appointments[s.key] > 0).map((s) => (
+                    <div
+                        key={s.key}
+                        title={`${s.label}: ${appointments[s.key]}`}
+                        style={{ width: `${(appointments[s.key] / total) * 100}%`, background: s.color }}
+                        className="first:rounded-l-full last:rounded-r-full"
+                    />
+                ))}
+            </div>
+            <ul className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2">
+                {STATUS_ORDER.map((s) => (
+                    <li key={s.key} className="flex items-center justify-between text-xs">
+                        <span className="flex items-center gap-1.5 text-slate-600">
+                            <span className="h-2 w-2 rounded-full" style={{ background: s.color }} /> {s.label}
+                        </span>
+                        <span className="tabular-nums text-slate-900">
+                            {appointments[s.key]} <span className="text-slate-400">· {Math.round((appointments[s.key] / total) * 100)}%</span>
+                        </span>
+                    </li>
+                ))}
+            </ul>
+        </div>
+    );
+}
+
+// Visits per day for the past week and the coming week (by slot date). Zero days are drawn
+// as a hairline so gaps stay visible; a divider marks today.
+function DailyBars({ daily }) {
+    const byDay = Object.fromEntries(daily.map((d) => [d.day, d.count]));
+    const days = Array.from({ length: 14 }, (_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() + i - 6);
+        const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        return { iso, count: byDay[iso] || 0, today: i === 6, future: i > 6 };
     });
+    const max = Math.max(1, ...days.map((d) => d.count));
+    const past = days.filter((d) => !d.future).reduce((n, d) => n + d.count, 0);
+    const ahead = days.filter((d) => d.future).reduce((n, d) => n + d.count, 0);
+
+    return (
+        <div>
+            <div className="mb-3 flex gap-6 text-xs text-slate-500">
+                <p><span className="text-lg font-semibold tabular-nums text-slate-900">{past}</span> past 7 days</p>
+                <p><span className="text-lg font-semibold tabular-nums text-slate-900">{ahead}</span> booked ahead</p>
+            </div>
+            <div className="flex h-28 items-end gap-0.5 border-b border-slate-200" role="img" aria-label={`Visits per day: ${past} in the past week, ${ahead} booked for the coming week`}>
+                {days.map((d) => (
+                    <div key={d.iso} className={`group relative flex h-full flex-1 items-end ${d.today ? 'border-l border-dashed border-slate-300 pl-0.5' : ''}`}>
+                        <div
+                            className={`w-full rounded-t-[4px] transition-colors ${d.future ? 'bg-blue-300 group-hover:bg-blue-400' : 'bg-blue-600 group-hover:bg-blue-700'}`}
+                            style={{ height: d.count ? `${(d.count / max) * 100}%` : '2px', opacity: d.count ? 1 : 0.2 }}
+                        />
+                        <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-[11px] text-white opacity-0 group-hover:opacity-100">
+                            {formatDate(d.iso)}: {d.count} {d.future ? 'booked' : 'visits'}
+                        </span>
+                    </div>
+                ))}
+            </div>
+            <div className="mt-1 grid grid-cols-[6fr_1fr_7fr] text-[11px] text-slate-400">
+                <span>{formatDate(days[0].iso, { day: 'numeric', month: 'short' })}</span>
+                <span className="text-center font-medium text-slate-600">Today</span>
+                <span className="text-right">{formatDate(days[13].iso, { day: 'numeric', month: 'short' })}</span>
+            </div>
+        </div>
+    );
+}
+
+const EMPTY_STAFF = { firstName: '', lastName: '', email: '', password: '', specialization: '', roomNumber: '' };
+
+function AddStaffModal({ open, onClose, onDone }) {
+    const toast = useToast();
+    const [form, setForm] = useState(EMPTY_STAFF);
+    const [busy, setBusy] = useState(false);
+    const set = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
     useEffect(() => {
-        const fetchStats = async () => {
-            try {
-                const response = await api.get('/admin/stats');
-                setStats(response.data);
-            } catch (error) {
-                console.error("Failed to fetch admin stats:", error);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchStats();
-    }, []);
+        if (open) setForm(EMPTY_STAFF);
+    }, [open]);
 
-    const handleAddStaff = async (e) => {
+    const submit = async (e) => {
         e.preventDefault();
+        setBusy(true);
         try {
-            await api.post('/admin/staff', newStaff);
-            alert("Staff member successfully added!");
-            setShowAddStaff(false);
-            setNewStaff({ firstName: '', lastName: '', email: '', password: '', specialization: '', roomNumber: '' });
-            
-            // Refetch stats
-            const response = await api.get('/admin/stats');
-            setStats(response.data);
-        } catch (error) {
-            alert(error.response?.data?.message || "Failed to add staff member");
+            await api.post('/admin/staff', form);
+            toast(`${form.firstName} ${form.lastName} can now sign in`);
+            onDone();
+            onClose();
+        } catch (err) {
+            toast(errorMessage(err, 'Could not add staff member'), 'error');
+        } finally {
+            setBusy(false);
         }
     };
 
-    const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
+    return (
+        <Modal open={open} onClose={onClose} title="Add staff member" description="They sign in with this email and temporary password.">
+            <form onSubmit={submit} className="flex flex-col gap-3.5">
+                <div className="grid grid-cols-2 gap-3">
+                    <Field label="First name"><Input name="firstName" required value={form.firstName} onChange={set} /></Field>
+                    <Field label="Last name"><Input name="lastName" required value={form.lastName} onChange={set} /></Field>
+                </div>
+                <Field label="Email"><Input type="email" name="email" required value={form.email} onChange={set} /></Field>
+                <Field label="Temporary password" hint="At least 8 characters. Share it with them privately.">
+                    <Input type="text" name="password" required minLength={8} autoComplete="off" value={form.password} onChange={set} />
+                </Field>
+                <div className="grid grid-cols-2 gap-3">
+                    <Field label="Specialization"><Input name="specialization" placeholder="General physician" value={form.specialization} onChange={set} /></Field>
+                    <Field label="Room"><Input name="roomNumber" placeholder="Room 102" value={form.roomNumber} onChange={set} /></Field>
+                </div>
+                <div className="flex justify-end gap-2 pt-1">
+                    <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+                    <Button type="submit" loading={busy}>Add staff</Button>
+                </div>
+            </form>
+        </Modal>
+    );
+}
 
-    if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500">Loading Dashboard...</div>;
+const AdminDashboard = () => {
+    const toast = useToast();
+    const [stats, setStats] = useState(null);
+    const [staff, setStaff] = useState([]);
+    const [tab, setTab] = useState('activity');
+    const [showAdd, setShowAdd] = useState(false);
 
-    const chartData = [
-        { name: 'Completed', value: stats?.appointments?.completed || 0 },
-        { name: 'Pending', value: stats?.appointments?.pending || 0 },
-        { name: 'Confirmed', value: stats?.appointments?.confirmed || 0 },
-        { name: 'Cancelled', value: stats?.appointments?.cancelled || 0 },
-    ].filter(item => item.value > 0);
+    const load = useCallback(async () => {
+        try {
+            const [s, st] = await Promise.all([api.get('/admin/stats'), api.get('/admin/staff')]);
+            setStats(s.data);
+            setStaff(st.data);
+        } catch (err) {
+            toast(errorMessage(err, 'Could not load statistics'), 'error');
+        }
+    }, [toast]);
+
+    useEffect(() => {
+        load();
+    }, [load]);
 
     return (
-        <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto flex flex-col gap-8">
-            <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center py-4 border-b border-slate-200 gap-4">
-                <div>
-                    <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Admin Overview</h1>
-                    <p className="text-slate-500 mt-1">System Health and Analytics</p>
-                </div>
-                <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-3 px-4 py-2 bg-slate-100 rounded-full border border-slate-200">
-                        <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold">
-                            A
-                        </div>
-                        <span className="text-sm font-semibold text-slate-700">Administrator</span>
+        <AppShell
+            title="Clinic overview"
+            subtitle="Usage across students, staff and appointments."
+            actions={<Button onClick={() => setShowAdd(true)}><IconUserPlus size={16} /> Add staff</Button>}
+        >
+            {!stats ? (
+                <Spinner />
+            ) : (
+                <div className="flex flex-col gap-4">
+                    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                        <Stat icon={IconUsers} label="Students" value={stats.students} />
+                        <Stat icon={IconStethoscope} label="Staff" value={stats.staff} />
+                        <Stat icon={IconCalendarEvent} label="Appointments" value={stats.appointments.total} />
+                        <Stat
+                            icon={IconClockHour4}
+                            label="Awaiting confirmation"
+                            value={stats.appointments.pending}
+                            note={stats.appointments.pending ? 'Pending staff review' : 'All caught up'}
+                        />
                     </div>
-                    <button 
-                        onClick={logout}
-                        className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
-                        title="Log out"
+
+                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                        <Card title="Visits per day"><DailyBars daily={stats.daily} /></Card>
+                        <Card title="Appointments by status"><StatusBreakdown appointments={stats.appointments} /></Card>
+                    </div>
+
+                    <Card
+                        title={
+                            <Segmented
+                                value={tab}
+                                onChange={setTab}
+                                options={[
+                                    { value: 'activity', label: 'Recent activity' },
+                                    { value: 'staff', label: `Staff (${staff.length})` },
+                                ]}
+                            />
+                        }
+                        bodyClassName="p-0"
                     >
-                        <IconLogout />
-                    </button>
-                </div>
-            </header>
-
-            <div className="flex justify-end">
-                <button 
-                    onClick={() => setShowAddStaff(true)}
-                    className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-xl shadow-sm transition-colors"
-                >
-                    + Add New Staff
-                </button>
-            </div>
-
-            <main className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
-                {/* Metrics Row */}
-                <section className="lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-                            <IconUsers size={24} />
-                        </div>
-                        <div>
-                            <p className="text-sm text-slate-500 font-medium">Total Students</p>
-                            <p className="text-2xl font-bold text-slate-800">{stats?.students || 0}</p>
-                        </div>
-                    </div>
-                    <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
-                            <IconStethoscope size={24} />
-                        </div>
-                        <div>
-                            <p className="text-sm text-slate-500 font-medium">Active Staff</p>
-                            <p className="text-2xl font-bold text-slate-800">{stats?.staff || 0}</p>
-                        </div>
-                    </div>
-                    <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-2xl bg-green-50 text-green-600 flex items-center justify-center shrink-0">
-                            <IconCalendarEvent size={24} />
-                        </div>
-                        <div>
-                            <p className="text-sm text-slate-500 font-medium">Total Appointments</p>
-                            <p className="text-2xl font-bold text-slate-800">{stats?.appointments?.total || 0}</p>
-                        </div>
-                    </div>
-                    <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
-                            <IconActivity size={24} />
-                        </div>
-                        <div>
-                            <p className="text-sm text-slate-500 font-medium">System Status</p>
-                            <p className="text-xl font-bold text-slate-800">Healthy</p>
-                        </div>
-                    </div>
-                </section>
-
-                {/* Chart Section */}
-                <section className="lg:col-span-1 bg-white border border-slate-100 rounded-3xl p-6 shadow-sm flex flex-col">
-                    <h2 className="text-lg font-semibold text-slate-800 mb-6">Appointments by Status</h2>
-                    <div className="flex-1 min-h-[300px]">
-                        {chartData.length > 0 ? (
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                    <Pie
-                                        data={chartData}
-                                        cx="50%"
-                                        cy="50%"
-                                        innerRadius={60}
-                                        outerRadius={80}
-                                        paddingAngle={5}
-                                        dataKey="value"
-                                    >
-                                        {chartData.map((entry, index) => (
-                                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        <div className="overflow-x-auto">
+                            {tab === 'activity' ? (
+                                stats.recentAppointments.length === 0 ? (
+                                    <EmptyState icon={IconCalendarEvent} title="No activity yet" />
+                                ) : (
+                                    <table className="w-full text-left text-sm">
+                                        <thead className="text-xs text-slate-500">
+                                            <tr className="border-b border-slate-100">
+                                                <th className="px-4 py-2 font-medium">Visit date</th>
+                                                <th className="px-4 py-2 font-medium">Student</th>
+                                                <th className="px-4 py-2 font-medium">Doctor</th>
+                                                <th className="px-4 py-2 text-right font-medium">Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {stats.recentAppointments.map((a) => (
+                                                <tr key={a.appointment_id} className="hover:bg-slate-50">
+                                                    <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">{formatDate(a.slot_date)}</td>
+                                                    <td className="px-4 py-2.5 text-slate-900">{a.student_first} {a.student_last}</td>
+                                                    <td className="px-4 py-2.5 text-slate-600">Dr. {a.staff_last}</td>
+                                                    <td className="px-4 py-2.5 text-right"><StatusPill status={a.status} /></td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                )
+                            ) : staff.length === 0 ? (
+                                <EmptyState icon={IconStethoscope} title="No staff yet">Add a doctor or nurse so students can book.</EmptyState>
+                            ) : (
+                                <table className="w-full text-left text-sm">
+                                    <thead className="text-xs text-slate-500">
+                                        <tr className="border-b border-slate-100">
+                                            <th className="px-4 py-2 font-medium">Name</th>
+                                            <th className="px-4 py-2 font-medium">Specialization</th>
+                                            <th className="px-4 py-2 font-medium">Room</th>
+                                            <th className="px-4 py-2 font-medium">Email</th>
+                                            <th className="px-4 py-2 text-right font-medium">Added</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {staff.map((s) => (
+                                            <tr key={s.staff_id} className="hover:bg-slate-50">
+                                                <td className="px-4 py-2.5 text-slate-900">{s.first_name} {s.last_name}</td>
+                                                <td className="px-4 py-2.5 text-slate-600">{s.specialization || '—'}</td>
+                                                <td className="px-4 py-2.5 text-slate-600">{s.room_number || '—'}</td>
+                                                <td className="px-4 py-2.5 text-slate-600">{s.email}</td>
+                                                <td className="whitespace-nowrap px-4 py-2.5 text-right text-slate-500">
+                                                    {parseDate(s.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}
+                                                </td>
+                                            </tr>
                                         ))}
-                                    </Pie>
-                                    <Tooltip 
-                                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                    />
-                                    <Legend verticalAlign="bottom" height={36}/>
-                                </PieChart>
-                            </ResponsiveContainer>
-                        ) : (
-                            <div className="h-full flex items-center justify-center text-slate-400">
-                                No data available
-                            </div>
-                        )}
-                    </div>
-                </section>
-
-                {/* Recent Activity Table */}
-                <section className="lg:col-span-2 bg-white border border-slate-100 rounded-3xl p-6 shadow-sm">
-                    <h2 className="text-lg font-semibold text-slate-800 mb-6">Recent Activity</h2>
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
-                            <thead>
-                                <tr>
-                                    <th className="py-4 px-4 text-sm font-semibold text-slate-500 border-b border-slate-100">Date</th>
-                                    <th className="py-4 px-4 text-sm font-semibold text-slate-500 border-b border-slate-100">Student</th>
-                                    <th className="py-4 px-4 text-sm font-semibold text-slate-500 border-b border-slate-100">Doctor</th>
-                                    <th className="py-4 px-4 text-sm font-semibold text-slate-500 border-b border-slate-100 text-right">Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {!stats?.recentAppointments || stats.recentAppointments.length === 0 ? (
-                                    <tr>
-                                        <td colSpan="4" className="py-8 text-center text-slate-400">No recent activity</td>
-                                    </tr>
-                                ) : stats.recentAppointments.map(apt => (
-                                    <tr key={apt.appointment_id} className="hover:bg-slate-50/50 transition-colors">
-                                        <td className="py-4 px-4 text-slate-600 font-medium">
-                                            {new Date(apt.created_at).toLocaleDateString()}
-                                        </td>
-                                        <td className="py-4 px-4 text-slate-800">
-                                            {apt.student_first} {apt.student_last}
-                                        </td>
-                                        <td className="py-4 px-4 text-slate-600">
-                                            Dr. {apt.staff_last}
-                                        </td>
-                                        <td className="py-4 px-4 text-right">
-                                            <span className={`text-xs font-semibold px-3 py-1.5 rounded-lg capitalize
-                                                ${apt.status === 'completed' ? 'bg-blue-50 text-blue-600' : ''}
-                                                ${apt.status === 'pending' ? 'bg-orange-50 text-orange-600' : ''}
-                                                ${apt.status === 'cancelled' ? 'bg-red-50 text-red-600' : ''}
-                                            `}>
-                                                {apt.status}
-                                            </span>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </section>
-            </main>
-
-            {/* Add Staff Modal */}
-            {showAddStaff && (
-                <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50">
-                    <div className="bg-white rounded-3xl p-6 md:p-8 w-full max-w-xl shadow-xl max-h-[90vh] overflow-y-auto">
-                        <h2 className="text-xl font-semibold mb-6">Add New Staff Member</h2>
-                        
-                        <form onSubmit={handleAddStaff} className="flex flex-col gap-4">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">First Name *</label>
-                                    <input required className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-1 focus:ring-blue-500"
-                                        value={newStaff.firstName} onChange={e => setNewStaff({...newStaff, firstName: e.target.value})} />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Last Name *</label>
-                                    <input required className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-1 focus:ring-blue-500"
-                                        value={newStaff.lastName} onChange={e => setNewStaff({...newStaff, lastName: e.target.value})} />
-                                </div>
-                            </div>
-                            
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Email Address * (for login)</label>
-                                <input required type="email" className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-1 focus:ring-blue-500"
-                                    value={newStaff.email} onChange={e => setNewStaff({...newStaff, email: e.target.value})} />
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Temporary Password *</label>
-                                <input required type="password" minLength={6} className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-1 focus:ring-blue-500"
-                                    value={newStaff.password} onChange={e => setNewStaff({...newStaff, password: e.target.value})} />
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Specialization</label>
-                                    <input placeholder="e.g., General Physician" className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-1 focus:ring-blue-500"
-                                        value={newStaff.specialization} onChange={e => setNewStaff({...newStaff, specialization: e.target.value})} />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Room Number</label>
-                                    <input placeholder="e.g., 102A" className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-1 focus:ring-blue-500"
-                                        value={newStaff.roomNumber} onChange={e => setNewStaff({...newStaff, roomNumber: e.target.value})} />
-                                </div>
-                            </div>
-
-                            <div className="flex justify-end gap-3 mt-6">
-                                <button type="button" onClick={() => setShowAddStaff(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-xl font-medium transition-colors">
-                                    Cancel
-                                </button>
-                                <button type="submit" className="px-6 py-2 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-colors">
-                                    Create Account
-                                </button>
-                            </div>
-                        </form>
-                    </div>
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
+                    </Card>
                 </div>
             )}
-        </div>
+            <AddStaffModal open={showAdd} onClose={() => setShowAdd(false)} onDone={load} />
+        </AppShell>
     );
 };
 

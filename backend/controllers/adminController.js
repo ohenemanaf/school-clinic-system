@@ -1,88 +1,74 @@
-const pool = require('../config/db');
 const bcrypt = require('bcryptjs');
+const pool = require('../config/db');
+const { HttpError, withTransaction } = require('../utils/http');
 
 exports.getDashboardStats = async (req, res) => {
-    try {
-        const [studentCount] = await pool.query('SELECT COUNT(*) as count FROM students');
-        const [staffCount] = await pool.query('SELECT COUNT(*) as count FROM staff');
-        const [appointmentStats] = await pool.query(`
-            SELECT status, COUNT(*) as count 
-            FROM appointments 
-            GROUP BY status
-        `);
-        const [recentAppointments] = await pool.query(`
-            SELECT a.appointment_id, a.status, a.created_at,
-                   st.first_name as student_first, st.last_name as student_last,
-                   sf.first_name as staff_first, sf.last_name as staff_last
+    const [[students], [staff], [appointmentStats], [recentAppointments], [daily]] = await Promise.all([
+        pool.query('SELECT COUNT(*) AS count FROM students'),
+        pool.query('SELECT COUNT(*) AS count FROM staff'),
+        pool.query('SELECT status, COUNT(*) AS count FROM appointments GROUP BY status'),
+        pool.query(`
+            SELECT a.appointment_id, a.status, a.created_at, t.slot_date,
+                   st.first_name AS student_first, st.last_name AS student_last,
+                   sf.first_name AS staff_first, sf.last_name AS staff_last
             FROM appointments a
             JOIN students st ON a.student_id = st.student_id
             JOIN time_slots t ON a.slot_id = t.slot_id
             JOIN staff sf ON t.staff_id = sf.staff_id
             ORDER BY a.created_at DESC
-            LIMIT 5
-        `);
+            LIMIT 8
+        `),
+        // Non-cancelled visits per day from 6 days ago to 7 days ahead (by slot date), for the chart.
+        pool.query(`
+            SELECT DATE_FORMAT(t.slot_date, '%Y-%m-%d') AS day, COUNT(*) AS count
+            FROM appointments a JOIN time_slots t ON a.slot_id = t.slot_id
+            WHERE a.status <> 'cancelled'
+              AND t.slot_date BETWEEN CURDATE() - INTERVAL 6 DAY AND CURDATE() + INTERVAL 7 DAY
+            GROUP BY t.slot_date ORDER BY t.slot_date
+        `),
+    ]);
 
-        // Format appointment stats into a key-value object
-        const appointments = {
-            total: 0,
-            pending: 0,
-            completed: 0,
-            cancelled: 0,
-            confirmed: 0
-        };
-
-        appointmentStats.forEach(stat => {
-            appointments[stat.status] = stat.count;
-            appointments.total += stat.count;
-        });
-
-        res.json({
-            students: studentCount[0].count,
-            staff: staffCount[0].count,
-            appointments,
-            recentAppointments
-        });
-    } catch (error) {
-        console.error("Admin stats error:", error);
-        res.status(500).json({ message: 'Error fetching admin statistics', error: error.message });
+    const appointments = { total: 0, pending: 0, confirmed: 0, completed: 0, cancelled: 0 };
+    for (const { status, count } of appointmentStats) {
+        appointments[status] = Number(count);
+        appointments.total += Number(count);
     }
+
+    res.json({
+        students: Number(students[0].count),
+        staff: Number(staff[0].count),
+        appointments,
+        recentAppointments,
+        daily: daily.map((d) => ({ day: d.day, count: Number(d.count) })),
+    });
+};
+
+exports.listStaff = async (req, res) => {
+    const [rows] = await pool.query(`
+        SELECT s.staff_id, s.first_name, s.last_name, s.specialization, s.room_number, u.email, u.created_at
+        FROM staff s JOIN users u ON s.user_id = u.user_id
+        ORDER BY s.last_name, s.first_name
+    `);
+    res.json(rows);
 };
 
 exports.addStaff = async (req, res) => {
-    const { email, password, firstName, lastName, specialization, roomNumber } = req.body;
+    const { email, password, firstName, lastName, specialization = null, roomNumber = null } = req.body;
+    const hashedPassword = await bcrypt.hash(password, 10);
     try {
-        const connection = await pool.getConnection();
-        await connection.beginTransaction();
-
-        try {
-            // 1. Create User account
-            const hashedPassword = await bcrypt.hash(password, 10);
-            const [userResult] = await connection.query(
-                'INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)',
-                [email, hashedPassword, 'staff']
+        await withTransaction(pool, async (conn) => {
+            const [user] = await conn.query(
+                "INSERT INTO users (email, password_hash, role) VALUES (?, ?, 'staff')",
+                [email.toLowerCase(), hashedPassword]
             );
-            
-            const userId = userResult.insertId;
-
-            // 2. Create Staff profile
-            await connection.query(
+            await conn.query(
                 'INSERT INTO staff (user_id, first_name, last_name, specialization, room_number) VALUES (?, ?, ?, ?, ?)',
-                [userId, firstName, lastName, specialization, roomNumber]
+                [user.insertId, firstName, lastName, specialization, roomNumber]
             );
-
-            await connection.commit();
-            res.status(201).json({ message: 'Staff member added successfully!' });
-        } catch (err) {
-            await connection.rollback();
-            throw err;
-        } finally {
-            connection.release();
-        }
-    } catch (error) {
-        console.error(error);
-        if (error.code === 'ER_DUP_ENTRY') {
-            return res.status(400).json({ message: 'A user with this email already exists' });
-        }
-        res.status(500).json({ message: 'Error adding staff member', error: error.message });
+        });
+    } catch (err) {
+        if (err.code === 'ER_DUP_ENTRY') throw new HttpError(409, 'A user with this email already exists.');
+        throw err;
     }
+    res.status(201).json({ message: 'Staff member added.' });
 };

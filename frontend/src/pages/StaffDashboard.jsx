@@ -1,401 +1,386 @@
-import React, { useState, useEffect } from 'react';
-import { IconCalendarEvent, IconClock, IconUser, IconStethoscope, IconLogout, IconCheck, IconCalendarPlus, IconX, IconWand } from '@tabler/icons-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { IconCalendarEvent, IconCalendarPlus, IconCheck, IconPlus, IconTrash, IconPrinter, IconX, IconClockOff } from '@tabler/icons-react';
 import api from '../utils/api';
-import { useAuth } from '../context/AuthContext';
+import AppShell from '../components/AppShell';
+import RecordCard from '../components/RecordCard';
+import { Button, Card, EmptyState, Field, IconButton, Input, Modal, Segmented, Spinner, StatusPill, Textarea, useToast, errorMessage } from '../components/ui';
+import { formatDate, formatLongDate, formatRange, groupByDate, isToday, parseDate, todayIso } from '../utils/format';
 
-const StaffDashboard = () => {
-    const [appointments, setAppointments] = useState([]);
-    const [openSlots, setOpenSlots] = useState([]);
-    const [selectedApt, setSelectedApt] = useState(null);
-    const [showAddStaff, setShowAddStaff] = useState(false); // Used in Admin, removed from here
-    
-    // Add Slot Form State
-    const [showAddSlot, setShowAddSlot] = useState(false);
-    const [newSlot, setNewSlot] = useState({
-        slotDate: '', startTime: '', endTime: ''
-    });
+const EMPTY_MED = { medicineName: '', dosage: '', frequency: '', duration: '', instructions: '' };
+const startOfToday = () => new Date(new Date().toDateString());
 
-    // Complete Appointment State
+const FILTERS = {
+    today: (a) => isToday(a.slot_date) && a.status !== 'cancelled',
+    upcoming: (a) => ['pending', 'confirmed'].includes(a.status) && parseDate(a.slot_date) >= startOfToday(),
+    past: (a) => !['pending', 'confirmed'].includes(a.status) || parseDate(a.slot_date) < startOfToday(),
+};
+
+function CompleteVisitModal({ appointment, onClose, onDone }) {
+    const toast = useToast();
     const [diagnosis, setDiagnosis] = useState('');
-    const [prescription, setPrescription] = useState('');
     const [notes, setNotes] = useState('');
-
-    const { logout, user } = useAuth();
-    
-    // Quick duration helper
-    const applyDuration = (minutes) => {
-        if (!newSlot.startTime) {
-            alert("Please select a start time first!");
-            return;
-        }
-        const [hours, mins] = newSlot.startTime.split(':').map(Number);
-        const date = new Date();
-        date.setHours(hours, mins + minutes);
-        const endHours = String(date.getHours()).padStart(2, '0');
-        const endMins = String(date.getMinutes()).padStart(2, '0');
-        setNewSlot(prev => ({ ...prev, endTime: `${endHours}:${endMins}` }));
-    };
-    
-    const loadData = async () => {
-        try {
-            const [aptRes, slotRes] = await Promise.all([
-                api.post('/appointments/staff-appointments'),
-                api.post('/appointments/staff-slots')
-            ]);
-            setAppointments(aptRes.data);
-            setOpenSlots(slotRes.data);
-        } catch (error) {
-            console.error("Failed to fetch dashboard data:", error);
-        }
-    };
+    const [meds, setMeds] = useState([]);
+    const [history, setHistory] = useState(null);
+    const [busy, setBusy] = useState(false);
 
     useEffect(() => {
-        loadData();
-    }, [user.userId]);
+        if (!appointment) return;
+        setDiagnosis('');
+        setNotes('');
+        setMeds([]);
+        setHistory(null);
+        api.get(`/records/student/${appointment.student_id}`)
+            .then((r) => setHistory(r.data))
+            .catch(() => setHistory([]));
+    }, [appointment]);
 
-    const handleComplete = async (e) => {
+    const setMed = (i, field, value) => setMeds((list) => list.map((m, j) => (j === i ? { ...m, [field]: value } : m)));
+
+    const submit = async (e) => {
         e.preventDefault();
+        setBusy(true);
         try {
-            await api.post('/records/add', {
-                studentId: selectedApt.student_id, // we need student_id from appointment query
-                staffId: selectedApt.staff_id,     // and staff_id
-                appointmentId: selectedApt.appointment_id,
+            const res = await api.post('/records', {
+                appointmentId: appointment.appointment_id,
                 diagnosis,
-                prescription,
-                notes
+                notes,
+                prescriptions: meds.filter((m) => m.medicineName.trim()),
             });
-            alert("Appointment completed and medical record saved!");
-            setSelectedApt(null);
-            setDiagnosis('');
-            setPrescription('');
-            setNotes('');
-            
-            // Refetch
-            await loadData();
-        } catch (error) {
-            alert(error.response?.data?.message || "Failed to save record");
+            toast(res.data.message);
+            onDone();
+        } catch (err) {
+            toast(errorMessage(err, 'Could not save the record'), 'error');
+        } finally {
+            setBusy(false);
         }
     };
 
-    const handleAddSlot = async (e) => {
+    if (!appointment) return null;
+    return (
+        <Modal
+            open
+            width="max-w-2xl"
+            onClose={onClose}
+            title={`Complete visit · ${appointment.student_first_name} ${appointment.student_last_name}`}
+            description={`${formatLongDate(appointment.slot_date)}, ${formatRange(appointment.start_time, appointment.end_time)} · Reason: ${appointment.reason}`}
+        >
+            <form onSubmit={submit} className="flex flex-col gap-3.5">
+                <Field label="Diagnosis">
+                    <Input required maxLength={2000} value={diagnosis} onChange={(e) => setDiagnosis(e.target.value)} />
+                </Field>
+                <Field label="Notes (visible to the student)">
+                    <Textarea maxLength={4000} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Advice, follow-up, rest days…" />
+                </Field>
+
+                <div>
+                    <div className="mb-2 flex items-center justify-between">
+                        <span className="text-xs font-medium text-slate-600">Prescription</span>
+                        <Button type="button" variant="secondary" size="sm" disabled={meds.length >= 10} onClick={() => setMeds([...meds, { ...EMPTY_MED }])}>
+                            <IconPlus size={14} /> Add medicine
+                        </Button>
+                    </div>
+                    {meds.length === 0 ? (
+                        <p className="rounded-lg border border-dashed border-slate-200 px-3 py-3 text-center text-xs text-slate-500">
+                            No medicines. Add one if this visit needs a prescription.
+                        </p>
+                    ) : (
+                        <ul className="flex flex-col gap-2">
+                            {meds.map((m, i) => (
+                                <li key={i} className="rounded-lg border border-slate-200 bg-slate-50/60 p-2.5">
+                                    <div className="flex gap-2">
+                                        <Input aria-label="Medicine" required placeholder="Medicine and strength, e.g. Paracetamol 500mg" value={m.medicineName} onChange={(e) => setMed(i, 'medicineName', e.target.value)} />
+                                        <IconButton type="button" label="Remove medicine" onClick={() => setMeds(meds.filter((_, j) => j !== i))}>
+                                            <IconX size={16} />
+                                        </IconButton>
+                                    </div>
+                                    <div className="mt-2 grid grid-cols-3 gap-2">
+                                        <Input aria-label="Dosage" placeholder="Dosage" value={m.dosage} onChange={(e) => setMed(i, 'dosage', e.target.value)} />
+                                        <Input aria-label="Frequency" placeholder="Frequency" value={m.frequency} onChange={(e) => setMed(i, 'frequency', e.target.value)} />
+                                        <Input aria-label="Duration" placeholder="Duration" value={m.duration} onChange={(e) => setMed(i, 'duration', e.target.value)} />
+                                    </div>
+                                    <Input className="mt-2" aria-label="Instructions" placeholder="Instructions (optional), e.g. after meals" value={m.instructions} onChange={(e) => setMed(i, 'instructions', e.target.value)} />
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+
+                <details className="rounded-lg border border-slate-200 px-3 py-2">
+                    <summary className="cursor-pointer text-xs font-medium text-slate-600">
+                        Past visits {history ? `(${history.length})` : ''}
+                    </summary>
+                    <div className="mt-2 flex flex-col gap-2">
+                        {!history ? <Spinner /> : history.length ? history.map((r) => <RecordCard key={r.record_id} record={r} />) : (
+                            <p className="py-2 text-xs text-slate-500">First visit to the clinic.</p>
+                        )}
+                    </div>
+                </details>
+
+                <div className="flex justify-end gap-2">
+                    <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+                    <Button type="submit" loading={busy}><IconCheck size={16} /> Complete visit</Button>
+                </div>
+            </form>
+        </Modal>
+    );
+}
+
+function addMinutes(time, minutes) {
+    const [h, m] = time.split(':').map(Number);
+    const total = Math.min(h * 60 + m + minutes, 23 * 60 + 59);
+    return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function AddSlotModal({ open, onClose, onDone }) {
+    const toast = useToast();
+    const [slot, setSlot] = useState({ slotDate: todayIso(), startTime: '09:00', endTime: '09:30' });
+    const [busy, setBusy] = useState(false);
+
+    const submit = async (e) => {
         e.preventDefault();
+        setBusy(true);
         try {
-            await api.post('/appointments/slots/add', newSlot);
-            alert("Time slot successfully added!");
-            setShowAddSlot(false);
-            setNewSlot({ slotDate: '', startTime: '', endTime: '' });
-            await loadData();
-        } catch (error) {
-            alert(error.response?.data?.message || "Failed to add time slot");
-        }
-    };
-
-    const handleCancel = async (aptId) => {
-        if (!window.confirm("Are you sure you want to cancel this appointment and mark yourself as busy?")) return;
-        
-        try {
-            await api.put(`/appointments/${aptId}/cancel-by-staff`);
-            alert("Appointment cancelled and student notified.");
-            // Refetch
-            await loadData();
-        } catch (error) {
-            alert(error.response?.data?.message || "Failed to cancel appointment");
+            await api.post('/appointments/staff/slots', slot);
+            toast(`Slot added: ${formatDate(slot.slotDate)}, ${formatRange(slot.startTime, slot.endTime)}`);
+            // Keep the modal open and move to the next block, so adding a morning of slots is quick.
+            const duration = (() => {
+                const [sh, sm] = slot.startTime.split(':').map(Number);
+                const [eh, em] = slot.endTime.split(':').map(Number);
+                return eh * 60 + em - (sh * 60 + sm);
+            })();
+            setSlot((s) => ({ ...s, startTime: s.endTime, endTime: addMinutes(s.endTime, duration) }));
+            onDone();
+        } catch (err) {
+            toast(errorMessage(err, 'Could not add the slot'), 'error');
+        } finally {
+            setBusy(false);
         }
     };
 
     return (
-        <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto flex flex-col gap-6 md:gap-8">
-            <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center py-4 border-b border-slate-200 gap-4">
-                <div className="flex items-center gap-3">
-                    <div className="p-2 md:p-3 bg-blue-100 text-blue-600 rounded-2xl">
-                        <IconStethoscope size={24} className="md:w-[28px] md:h-[28px]" stroke={1.5} />
-                    </div>
-                    <div>
-                        <h1 className="text-xl md:text-2xl font-semibold tracking-tight text-slate-800">Clinic Staff</h1>
-                        <p className="text-xs md:text-sm text-slate-500 font-medium">Provider Portal</p>
-                    </div>
+        <Modal open={open} onClose={onClose} title="Add availability" description="Students can book this time once it's added.">
+            <form onSubmit={submit} className="flex flex-col gap-3.5">
+                <Field label="Date">
+                    <Input type="date" required min={todayIso()} value={slot.slotDate} onChange={(e) => setSlot({ ...slot, slotDate: e.target.value })} />
+                </Field>
+                <div className="grid grid-cols-2 gap-3">
+                    <Field label="Start">
+                        <Input type="time" required value={slot.startTime} onChange={(e) => setSlot({ ...slot, startTime: e.target.value })} />
+                    </Field>
+                    <Field label="End">
+                        <Input type="time" required value={slot.endTime} onChange={(e) => setSlot({ ...slot, endTime: e.target.value })} />
+                    </Field>
                 </div>
-                
-                <div className="flex items-center gap-4 bg-white px-4 py-2 rounded-full shadow-sm border border-slate-100 w-full sm:w-auto justify-center sm:justify-start">
-                    <IconUser size={20} className="text-slate-400" />
-                    <span className="text-sm font-semibold text-slate-700">Staff Portal</span>
-                    <button 
-                        onClick={logout}
-                        className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
-                        title="Log out"
-                    >
-                        <IconLogout size={20} />
-                    </button>
+                <div className="flex items-center gap-1.5">
+                    <span className="mr-1 text-xs text-slate-500">Length</span>
+                    {[15, 20, 30, 45, 60].map((m) => (
+                        <button
+                            key={m}
+                            type="button"
+                            onClick={() => setSlot((s) => ({ ...s, endTime: addMinutes(s.startTime, m) }))}
+                            className="h-7 rounded-md border border-slate-200 px-2 text-xs text-slate-600 hover:border-blue-300 hover:text-blue-700"
+                        >
+                            {m}m
+                        </button>
+                    ))}
                 </div>
-            </header>
+                <div className="flex justify-end gap-2 pt-1">
+                    <Button type="button" variant="ghost" onClick={onClose}>Done</Button>
+                    <Button type="submit" loading={busy}>Add slot</Button>
+                </div>
+            </form>
+        </Modal>
+    );
+}
 
-            <div className="flex justify-end">
-                <button 
-                    onClick={() => setShowAddSlot(true)}
-                    className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-xl shadow-sm transition-colors"
-                >
-                    + Manage Availability
-                </button>
-            </div>
+const StaffDashboard = () => {
+    const toast = useToast();
+    const [tab, setTab] = useState('appointments');
+    const [filter, setFilter] = useState('upcoming');
+    const [appointments, setAppointments] = useState([]);
+    const [slots, setSlots] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [completing, setCompleting] = useState(null);
+    const [cancelling, setCancelling] = useState(null);
+    const [showAddSlot, setShowAddSlot] = useState(false);
+    const [busyId, setBusyId] = useState(null);
 
-            <main className="grid grid-cols-1 gap-8">
-                <section className="bg-white p-5 md:p-8 rounded-3xl shadow-sm border border-slate-100">
-                    <h2 className="text-lg md:text-xl font-semibold mb-6 flex items-center gap-2">
-                        <IconCalendarEvent className="text-blue-500" />
-                        My Upcoming Appointments
-                    </h2>
-                    
-                    {!Array.isArray(appointments) || appointments.length === 0 ? (
-                        <p className="text-slate-500">No appointments scheduled.</p>
+    const load = useCallback(async () => {
+        try {
+            const [a, s] = await Promise.all([api.get('/appointments/staff'), api.get('/appointments/staff/slots')]);
+            setAppointments(a.data);
+            setSlots(s.data);
+        } catch (err) {
+            toast(errorMessage(err, 'Could not load your schedule'), 'error');
+        } finally {
+            setLoading(false);
+        }
+    }, [toast]);
+
+    useEffect(() => {
+        load();
+    }, [load]);
+
+    const act = async (id, request, success) => {
+        setBusyId(id);
+        try {
+            await request();
+            toast(success);
+            await load();
+        } catch (err) {
+            toast(errorMessage(err), 'error');
+        } finally {
+            setBusyId(null);
+        }
+    };
+
+    const shown = appointments.filter(FILTERS[filter]);
+    if (filter === 'past') shown.reverse();
+    const counts = Object.fromEntries(Object.entries(FILTERS).map(([k, f]) => [k, appointments.filter(f).length]));
+    const pending = appointments.filter((a) => a.status === 'pending' && FILTERS.upcoming(a)).length;
+
+    return (
+        <AppShell
+            title="Clinic schedule"
+            subtitle={
+                loading ? ' ' : `${counts.today} visit${counts.today === 1 ? '' : 's'} today${pending ? ` · ${pending} waiting for confirmation` : ''}`
+            }
+            actions={<Button onClick={() => setShowAddSlot(true)}><IconCalendarPlus size={16} /> Add availability</Button>}
+        >
+            <Card
+                title={
+                    <Segmented
+                        value={tab}
+                        onChange={setTab}
+                        options={[
+                            { value: 'appointments', label: 'Appointments', count: pending },
+                            { value: 'slots', label: `Open slots (${slots.length})` },
+                        ]}
+                    />
+                }
+                action={
+                    tab === 'appointments' && (
+                        <Segmented
+                            value={filter}
+                            onChange={setFilter}
+                            options={[
+                                { value: 'today', label: 'Today' },
+                                { value: 'upcoming', label: 'Upcoming' },
+                                { value: 'past', label: 'Past' },
+                            ]}
+                        />
+                    )
+                }
+            >
+                {loading ? (
+                    <Spinner />
+                ) : tab === 'appointments' ? (
+                    shown.length === 0 ? (
+                        <EmptyState icon={IconCalendarEvent} title={filter === 'past' ? 'No past visits yet' : 'Nothing scheduled'}>
+                            {filter !== 'past' && 'Add availability so students can book you.'}
+                        </EmptyState>
                     ) : (
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left border-collapse">
-                                <thead>
-                                    <tr className="border-b border-slate-200 text-slate-500 text-sm">
-                                        <th className="pb-3 font-semibold">Date & Time</th>
-                                        <th className="pb-3 font-semibold">Student Name</th>
-                                        <th className="pb-3 font-semibold">Reason</th>
-                                        <th className="pb-3 font-semibold">Status</th>
-                                        <th className="pb-3 font-semibold">Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {appointments.map((apt) => (
-                                        <tr key={apt.appointment_id} className="border-b border-slate-100 hover:bg-slate-50">
-                                            <td className="py-4">
-                                                <div className="font-semibold text-slate-800">{new Date(apt.slot_date).toLocaleDateString()}</div>
-                                                <div className="text-xs text-slate-500 flex items-center gap-1 mt-1">
-                                                    <IconClock size={12} /> {apt.start_time} - {apt.end_time}
-                                                </div>
-                                            </td>
-                                            <td className="py-4">
-                                                <div className="font-medium text-slate-800">{apt.student_first_name} {apt.student_last_name}</div>
-                                                <div className="text-xs text-slate-500">ID: {apt.student_number}</div>
-                                            </td>
-                                            <td className="py-4 text-sm text-slate-600">{apt.reason}</td>
-                                            <td className="py-4">
-                                                <span className={`text-xs px-2 py-1 rounded-md font-semibold ${
-                                                    apt.status === 'completed' ? 'bg-green-100 text-green-700' :
-                                                    apt.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
-                                                    'bg-blue-100 text-blue-700'
-                                                }`}>
-                                                    {apt.status.toUpperCase()}
-                                                </span>
-                                            </td>
-                                            <td className="py-4">
+                        <ul className="divide-y divide-slate-100">
+                            {shown.map((a) => {
+                                const active = ['pending', 'confirmed'].includes(a.status);
+                                return (
+                                    <li key={a.appointment_id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 md:flex-row md:items-center md:justify-between">
+                                        <div className="flex min-w-0 gap-3">
+                                            <div className="w-24 shrink-0">
+                                                <p className="text-sm font-medium text-slate-900">{isToday(a.slot_date) ? 'Today' : formatDate(a.slot_date)}</p>
+                                                <p className="text-xs text-slate-500">{formatRange(a.start_time, a.end_time)}</p>
+                                            </div>
+                                            <div className="min-w-0">
                                                 <div className="flex items-center gap-2">
-                                                    {apt.status === 'pending' && (
-                                                        <button 
-                                                            onClick={() => setSelectedApt(apt)}
-                                                            className="flex items-center gap-1 text-sm bg-green-50 text-green-600 px-3 py-1.5 rounded-lg hover:bg-green-100 transition-colors"
-                                                        >
-                                                            <IconCheck size={16} /> Complete
-                                                        </button>
-                                                    )}
-                                                    {apt.status === 'pending' && (
-                                                        <button 
-                                                            onClick={() => handleCancel(apt.appointment_id)}
-                                                            className="flex items-center gap-1 text-sm bg-red-50 text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-100 transition-colors"
-                                                            title="Mark as busy and notify student"
-                                                        >
-                                                            Cancel (Busy)
-                                                        </button>
-                                                    )}
+                                                    <span className="truncate text-sm font-medium text-slate-900">
+                                                        {a.student_first_name} {a.student_last_name}
+                                                    </span>
+                                                    <StatusPill status={a.status} />
                                                 </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    )}
-                </section>
-
-                <section className="bg-white p-5 md:p-8 rounded-3xl shadow-sm border border-slate-100 mt-2">
-                    <h2 className="text-lg md:text-xl font-semibold mb-6 flex items-center gap-2">
-                        <IconCalendarEvent className="text-green-500" />
-                        My Open Availability
-                    </h2>
-                    
-                    {!Array.isArray(openSlots) || openSlots.length === 0 ? (
-                        <p className="text-slate-500">You don't have any open slots right now.</p>
-                    ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                            {openSlots.map((slot) => (
-                                <div key={slot.slot_id} className="bg-green-50 border border-green-100 p-4 rounded-2xl flex flex-col items-start gap-1">
-                                    <span className="text-sm font-bold text-green-800">
-                                        {new Date(slot.slot_date).toLocaleDateString()}
-                                    </span>
-                                    <div className="flex items-center gap-1 text-xs font-semibold text-green-600 bg-green-100/50 px-2 py-1 rounded-md mt-1">
-                                        <IconClock size={14} /> {slot.start_time} - {slot.end_time}
-                                    </div>
-                                    <span className="text-xs text-green-600 mt-2 font-medium">Available to book</span>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </section>
-            </main>
-
-            {/* Completion Modal */}
-            {selectedApt && (
-                <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50">
-                    <div className="bg-white rounded-3xl p-6 md:p-8 w-full max-w-lg shadow-xl">
-                        <h2 className="text-xl font-semibold mb-2">Complete Appointment</h2>
-                        <p className="text-sm text-slate-500 mb-6">Enter medical notes for {selectedApt.student_first_name} {selectedApt.student_last_name}</p>
-                        
-                        <form onSubmit={handleComplete} className="flex flex-col gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Diagnosis *</label>
-                                <input 
-                                    required 
-                                    className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none" 
-                                    value={diagnosis} onChange={e => setDiagnosis(e.target.value)} 
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Prescription</label>
-                                <input 
-                                    className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none" 
-                                    value={prescription} onChange={e => setPrescription(e.target.value)} 
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Additional Notes</label>
-                                <textarea 
-                                    className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-1 focus:ring-blue-500 outline-none h-24 resize-none" 
-                                    value={notes} onChange={e => setNotes(e.target.value)} 
-                                ></textarea>
-                            </div>
-                            <div className="flex justify-end gap-3 mt-4">
-                                <button type="button" onClick={() => setSelectedApt(null)} className="px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-xl font-medium transition-colors">
-                                    Cancel
-                                </button>
-                                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-colors">
-                                    Save Record
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {/* Add Slot Modal - Enhanced Premium UI */}
-            {showAddSlot && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-                    <div className="bg-white rounded-[2rem] w-full max-w-md shadow-2xl overflow-hidden border border-slate-100 transform transition-all">
-                        
-                        {/* Modal Header */}
-                        <div className="bg-gradient-to-br from-blue-600 to-indigo-700 p-8 text-white relative">
-                            <button 
-                                onClick={() => setShowAddSlot(false)}
-                                className="absolute top-4 right-4 p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors"
-                            >
-                                <IconX size={20} />
-                            </button>
-                            <div className="w-14 h-14 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center mb-4 shadow-inner">
-                                <IconCalendarPlus size={28} className="text-white drop-shadow-md" />
-                            </div>
-                            <h2 className="text-2xl font-bold tracking-tight">Create Availability</h2>
-                            <p className="text-blue-100 text-sm mt-1 opacity-90">Open up your schedule for students</p>
-                        </div>
-                        
-                        {/* Modal Body */}
-                        <form onSubmit={handleAddSlot} className="p-8 flex flex-col gap-6">
-                            
-                            {/* Date Picker */}
-                            <div className="group">
-                                <label className="block text-sm font-semibold text-slate-700 mb-2 transition-colors group-focus-within:text-blue-600">
-                                    Slot Date
-                                </label>
-                                <div className="relative">
-                                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                                        <IconCalendarEvent size={18} className="text-slate-400 group-focus-within:text-blue-500 transition-colors" />
-                                    </div>
-                                    <input 
-                                        required 
-                                        type="date" 
-                                        className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-slate-700 font-medium"
-                                        value={newSlot.slotDate} 
-                                        onChange={e => setNewSlot({...newSlot, slotDate: e.target.value})} 
-                                    />
-                                </div>
-                            </div>
-                            
-                            {/* Time Pickers */}
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="group">
-                                    <label className="block text-sm font-semibold text-slate-700 mb-2 transition-colors group-focus-within:text-blue-600">Start Time</label>
-                                    <div className="relative">
-                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                            <IconClock size={16} className="text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+                                                <p className="truncate text-xs text-slate-500">{a.student_number} · {a.reason}</p>
+                                            </div>
                                         </div>
-                                        <input 
-                                            required 
-                                            type="time" 
-                                            className="w-full pl-9 pr-3 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-slate-700 font-medium"
-                                            value={newSlot.startTime} 
-                                            onChange={e => setNewSlot({...newSlot, startTime: e.target.value})} 
-                                        />
-                                    </div>
-                                </div>
-                                <div className="group">
-                                    <label className="block text-sm font-semibold text-slate-700 mb-2 transition-colors group-focus-within:text-blue-600">End Time</label>
-                                    <div className="relative">
-                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                            <IconClock size={16} className="text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+                                        <div className="flex shrink-0 gap-1.5 md:justify-end">
+                                            {a.status === 'pending' && (
+                                                <Button
+                                                    variant="success"
+                                                    size="sm"
+                                                    loading={busyId === a.appointment_id}
+                                                    onClick={() => act(a.appointment_id, () => api.put(`/appointments/${a.appointment_id}/confirm`), 'Confirmed. The student has been notified.')}
+                                                >
+                                                    Confirm
+                                                </Button>
+                                            )}
+                                            {active && <Button size="sm" onClick={() => setCompleting(a)}>Complete visit</Button>}
+                                            {active && <Button variant="ghost" size="sm" onClick={() => setCancelling(a)}>Cancel</Button>}
+                                            {a.record_id && (
+                                                <Link
+                                                    to={`/prescriptions/${a.record_id}`}
+                                                    className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                                                >
+                                                    <IconPrinter size={14} /> Record
+                                                </Link>
+                                            )}
                                         </div>
-                                        <input 
-                                            required 
-                                            type="time" 
-                                            className="w-full pl-9 pr-3 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-slate-700 font-medium"
-                                            value={newSlot.endTime} 
-                                            onChange={e => setNewSlot({...newSlot, endTime: e.target.value})} 
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Magic Duration Chips */}
-                            <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100/50">
-                                <div className="flex items-center gap-1.5 mb-3 text-xs font-semibold text-blue-600 uppercase tracking-wider">
-                                    <IconWand size={14} /> Quick Duration
-                                </div>
-                                <div className="flex gap-2">
-                                    {[15, 30, 45, 60].map((mins) => (
-                                        <button
-                                            key={mins}
-                                            type="button"
-                                            onClick={() => applyDuration(mins)}
-                                            className="flex-1 py-2 px-1 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg shadow-sm hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 hover:-translate-y-0.5 active:translate-y-0 transition-all"
-                                        >
-                                            {mins}m
-                                        </button>
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                    )
+                ) : slots.length === 0 ? (
+                    <EmptyState icon={IconClockOff} title="No open slots">Add availability to let students book you.</EmptyState>
+                ) : (
+                    <div className="flex flex-col gap-4">
+                        {groupByDate(slots).map(([date, daySlots]) => (
+                            <div key={date}>
+                                <h3 className="mb-2 text-xs font-medium text-slate-500">{isToday(date) ? 'Today' : formatDate(date)}</h3>
+                                <div className="flex flex-wrap gap-2">
+                                    {daySlots.map((s) => (
+                                        <span key={s.slot_id} className="inline-flex h-8 items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 pl-2.5 pr-1 text-xs font-medium text-emerald-800">
+                                            {formatRange(s.start_time, s.end_time)}
+                                            <button
+                                                aria-label="Remove slot"
+                                                disabled={busyId === `slot-${s.slot_id}`}
+                                                onClick={() => act(`slot-${s.slot_id}`, () => api.delete(`/appointments/staff/slots/${s.slot_id}`), 'Slot removed')}
+                                                className="grid h-6 w-6 place-items-center rounded-md text-emerald-600 hover:bg-emerald-100 hover:text-red-600"
+                                            >
+                                                <IconTrash size={13} />
+                                            </button>
+                                        </span>
                                     ))}
                                 </div>
                             </div>
-
-                            {/* Actions */}
-                            <div className="flex gap-3 mt-2">
-                                <button 
-                                    type="button" 
-                                    onClick={() => setShowAddSlot(false)} 
-                                    className="flex-1 py-3.5 px-4 text-slate-700 font-semibold bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
-                                >
-                                    Cancel
-                                </button>
-                                <button 
-                                    type="submit" 
-                                    className="flex-1 py-3.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-md shadow-blue-500/20 transition-all hover:shadow-lg hover:shadow-blue-500/30"
-                                >
-                                    Publish Slot
-                                </button>
-                            </div>
-                        </form>
+                        ))}
                     </div>
+                )}
+            </Card>
+
+            <CompleteVisitModal appointment={completing} onClose={() => setCompleting(null)} onDone={() => { setCompleting(null); load(); }} />
+            <AddSlotModal open={showAddSlot} onClose={() => setShowAddSlot(false)} onDone={load} />
+
+            <Modal open={!!cancelling} onClose={() => setCancelling(null)} title="Cancel this appointment?">
+                {cancelling && (
+                    <p className="text-sm text-slate-600">
+                        {cancelling.student_first_name} will be notified. The {formatRange(cancelling.start_time, cancelling.end_time)} slot stays
+                        closed, since you're unavailable then.
+                    </p>
+                )}
+                <div className="mt-4 flex justify-end gap-2">
+                    <Button variant="ghost" onClick={() => setCancelling(null)}>Keep it</Button>
+                    <Button
+                        variant="danger"
+                        loading={busyId === cancelling?.appointment_id}
+                        onClick={() =>
+                            act(cancelling.appointment_id, () => api.put(`/appointments/${cancelling.appointment_id}/cancel-by-staff`), 'Cancelled. The student has been notified.')
+                                .then(() => setCancelling(null))
+                        }
+                    >
+                        Cancel appointment
+                    </Button>
                 </div>
-            )}
-        </div>
+            </Modal>
+        </AppShell>
     );
 };
 

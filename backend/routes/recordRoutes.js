@@ -1,9 +1,23 @@
 const express = require('express');
-const router = express.Router();
-const recordController = require('../controllers/recordController');
-const { verifyToken } = require('../middleware/authMiddleware');
+const c = require('../controllers/recordController');
+const { staffOnly, studentOnly, verifyToken, verifyRole } = require('../middleware/authMiddleware');
+const { validateBody, validateIdParam, rules } = require('../middleware/validate');
 
-router.post('/add', verifyToken, recordController.createRecord);
-router.get('/student/:studentId', verifyToken, recordController.getStudentRecords);
+const router = express.Router();
+
+router.post(
+    '/',
+    staffOnly,
+    validateBody({
+        appointmentId: { rule: rules.id() },
+        diagnosis: { rule: rules.string({ max: 2000 }) },
+        notes: { rule: rules.string({ max: 4000 }), optional: true },
+        prescriptions: { rule: (v) => (Array.isArray(v) ? null : 'must be a list'), optional: true },
+    }),
+    c.createRecord
+);
+router.get('/me', studentOnly, c.getMyRecords);
+router.get('/student/:studentId', staffOnly, validateIdParam('studentId'), c.getStudentRecords);
+router.get('/:id', verifyToken, verifyRole(['student', 'staff']), validateIdParam(), c.getRecord);
 
 module.exports = router;
