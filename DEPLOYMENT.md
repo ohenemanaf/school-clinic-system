@@ -17,7 +17,7 @@ It takes about 20 minutes. Do the steps in this order, because each one needs a 
 
 You don't need to create any tables yourself. The API creates them on first start.
 
-> **Note:** the app was tested on MySQL 8.4. TiDB is MySQL-compatible, and its docs say it supports everything the schema uses (stored generated columns with a unique index, `SELECT … FOR UPDATE`), but treat the first deploy as the test. If `npm run db:setup` fails in the Render logs, the simplest fallback is a paid MySQL host, such as Aiven's Developer plan.
+> **Note:** the app was tested on MySQL 8.4. TiDB is MySQL-compatible, and its docs say it supports everything the schema uses (stored generated columns with a unique index, `SELECT â€¦ FOR UPDATE`), but treat the first deploy as the test. If `npm run db:setup` fails in the Render logs, the simplest fallback is a paid MySQL host, such as Aiven's Developer plan.
 
 ## 2. API (Render)
 
