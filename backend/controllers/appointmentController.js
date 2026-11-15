@@ -5,8 +5,14 @@ const { HttpError, withTransaction } = require('../utils/http');
 
 const UPCOMING = "(t.slot_date > CURDATE() OR (t.slot_date = CURDATE() AND t.start_time > CURTIME()))";
 
+// "2026-11-16", "09:00:00" -> "Mon 16 Nov at 9:00". Built by hand so it doesn't depend on server locale/timezone.
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function formatSlot(row) {
-    return `${row.slot_date} at ${String(row.start_time).slice(0, 5)}`;
+    const [y, m, d] = String(row.slot_date).split('-').map(Number);
+    const day = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+    const [hh, mm] = String(row.start_time).split(':');
+    return `${DAYS[day]} ${d} ${MONTHS[m - 1]} at ${Number(hh)}:${mm}`;
 }
 
 // ---------- Students ----------

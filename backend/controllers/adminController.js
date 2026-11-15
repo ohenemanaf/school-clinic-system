@@ -18,11 +18,12 @@ exports.getDashboardStats = async (req, res) => {
             ORDER BY a.created_at DESC
             LIMIT 8
         `),
-        // Appointments per day for the last 14 days (by slot date), for the trend chart.
+        // Non-cancelled visits per day from 6 days ago to 7 days ahead (by slot date), for the chart.
         pool.query(`
             SELECT DATE_FORMAT(t.slot_date, '%Y-%m-%d') AS day, COUNT(*) AS count
             FROM appointments a JOIN time_slots t ON a.slot_id = t.slot_id
-            WHERE t.slot_date BETWEEN CURDATE() - INTERVAL 13 DAY AND CURDATE()
+            WHERE a.status <> 'cancelled'
+              AND t.slot_date BETWEEN CURDATE() - INTERVAL 6 DAY AND CURDATE() + INTERVAL 7 DAY
             GROUP BY t.slot_date ORDER BY t.slot_date
         `),
     ]);

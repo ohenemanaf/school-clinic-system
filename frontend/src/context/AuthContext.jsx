@@ -1,5 +1,7 @@
-import React, { createContext, useState, useEffect, useContext } from 'react';
+import { createContext, useState, useEffect, useContext } from 'react';
 import api from '../utils/api';
+
+export const HOME_BY_ROLE = { student: '/dashboard', staff: '/staff-dashboard', admin: '/admin-dashboard' };
 
 const AuthContext = createContext();
 
